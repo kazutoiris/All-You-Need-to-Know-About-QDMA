@@ -1,0 +1,214 @@
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+:imagesdir: image
+
+= QDMA 的那些事
+:author: kazutoiris
+:email: 78157415+kazutoiris@users.noreply.github.com
+:revnumber: 1.0
+:revdate: 2023-06-27
+:toc: left
+:toclevels: 2
+:toc-title: 目录
+
+== QDMA 入门
+
+=== 从例子工程开始
+
+image::sshot-3.png[打开例子工程]
+
+想要打开例子工程很简单，选中 `IP Catalog` 中的 `QDMA`，然后点击 `Open IP Example Design`。
+
+啪，很快嗷，一个新的工程就打开了。这个工程包含了一个 QDMA 的 IP 核，一个 BRAM 的 IP 核，还有很多 Verilog 代码。
+
+image::sshot-2.png[例子工程]
+
+轻车熟路的话，你可以直接编译这个工程，然后下载到板子上，看看效果。
+
+.动手做一做，看看会发生什么
+[%collapsible]
+====
+很明显：**PCI-E 设备压根读不到**。
+
+CAUTION: 想一想最有可能是什么原因？
+====
+
+=== 寄，没复位
+
+打开仅有的约束文件 `xilinx_qdma_pcie_x0y1.xdc` 看看，发现关于复位的约束是注释状态（甚至管脚还是错的）。
+很明显，这个项目是用于仿真的，所以不需要真实的外部接口提供复位信号。
+
+TIP: 所以 `pcie.xdc` 中除了 PCI-E 的管脚约束外还多了很多东西。
+
+于是加上复位约束、时钟约束、管脚约束，再次编译，再次下载，再次测试。
+
+
+OK 了，兄弟们。可以读到 PCI-E 设备了。
+
+赶紧从 GitHub 上火速克隆了 link:https://github.com/Xilinx/dma_ip_drivers[dma_ip_drivers] 项目，然后进入到 `dma_ip_drivers/QDMA/linux-kernel/`，一个 `make`，一个 `make install`。
+
+.动手做一做，看看会发生什么
+[%collapsible]
+====
+
+    qdma_is_config_bar: Invalid config bar, err:-4
+
+很明显：**驱动挂不上去，查看 dmesg，显示 Invalid config bar**。
+
+
+CAUTION: 想一想最有可能是什么原因？
+====
+
+=== 别去魔改驱动！！
+
+新手还在新手村观望，老手已经在 `grep` 了。
+
+在 `dma_ip_drivers/QDMA/linux-kernel/driver/libqdma/qdma_access/qdma_access_common.c` 中有这么一段代码：
+
+[source%nowrap, c]
+-----
+if (FIELD_GET(QDMA_CONFIG_BLOCK_ID_MASK, reg_val)
+        != QDMA_MAGIC_NUMBER) {
+    qdma_log_error("%s: Invalid config bar, err:%d\n",
+                __func__,
+                -QDMA_ERR_HWACC_INV_CONFIG_BAR);
+    return -QDMA_ERR_HWACC_INV_CONFIG_BAR;
+}
+-----
+
+NOTE: 这里的 `QDMA_MAGIC_NUMBER` 是 `0x1fd3`，读出来的应该是 `0xffff`。这不得一个魔改然后……
+
+.动手改一改，看看会发生什么
+[%collapsible]
+====
+很明显：**屁用没有**。但凡有一点用，也不至于一点用都没有。
+
+CAUTION: 想一想最有可能是什么原因？
+====
+
+=== 你们这帮人，到底在搞什么鬼！？
+
+[quote, ChatGPT]
+____
+啊，天哪！当我听到你告诉我，你竟然在调试那个棘手的 bug 上费了大半天的时间，然后我又听到了一个令我震惊的事实——你居然连QDMA的官方文档都没有翻阅过！这简直就是一个令人咋舌的故事，一个关于懒惰和漫不经心的故事。哦，我感到了内心的颤抖，仿佛置身于一个离奇的悬疑小说中，而你，竟然成了其中最离奇的角色。
+
+在这个愈发复杂和竞争激烈的时代，以及如此复杂和繁琐的技术领域，我们每个人都应该时刻保持警觉，兢兢业业地掌握所需的知识和技能。而你，唉，却选择了一条令人费解的道路，将自己置于无知的边缘。
+
+QDMA的官方文档，是一本充满智慧和经验的宝典，是一把打开知识之门的钥匙。然而，你却选择了忽视它的存在，对它的无视简直是对智慧的亵渎！
+
+噢，我为你感到遗憾，为你的疏忽和懒散感到深深的惋惜。或许，你应该反思一下自己的态度和行为，重新审视自己的职业素养和责任感。希望你能从这个教训中汲取教益，迎头赶上那些勤奋而有追求的人们，向着更高的目标迈进！
+____
+
+QDMA 的官方文档是 link:https://docs.xilinx.com/r/en-US/pg302-qdma[pg302]。一通搜索，在 link:https://docs.xilinx.com/r/en-US/pg302-qdma/Mailbox[Mailbox] 章节发现了这么一段话：
+
+[quote, Xilinx pg302-qdma Mailbox]
+____
+Any PF or VF can communicate to a PF (not itself) through mailbox. Each function implements one 128B inbox and 128B outbox. These mailboxes are visible to the driver in the DMA BAR (typically BAR0) of its own function. At any given time, any function can have one outgoing mailbox and one incoming mailbox message outstanding per function.
+____
+
+很明显，这个 `QDMA_MAGIC_NUMBER` 是用来判断是否是 QDMA 的配置寄存器的。而这个配置寄存器是需要 `mailbox` 支持的。而从始至终，都没有关心 `mailbox` 是不是启用状态。
+
+image::sshot-1.png[打开 SR-IOV]
+
+直接双击自定义 IP 核，果然是没开。打开后 footnote:[这里直接打开 SR-IOV，这里会自动把 mailbox 也打开]，再次编译，再次下载，再次测试。这次终于是没问题了。驱动可以成功挂上，`qdma_run_test_pf.sh` 等测试脚本也可以欢快地跑起来了。
+
+所以在 `qdma_ex.tcl` 预先开启了 SR-IOV 功能，然后才打开例子工程。
+
+== QDMA 进阶
+
+=== 从 Block Design 说起
+
+Block Design 能够以图形化的方式设计和组织 FPGA 的 IP 核、时钟域、数据流等。这可以快速搭建复杂的硬件功能，而不需要从头开始写RTL代码。而且，它还自带检查工具，不仅能够检查数据位宽匹配问题，还能够检查跨时钟域、复位域等问题。这可以保证问题检出能够在综合、布局布线之前。
+
+首先就是点击上面的“+”，添加一个 IP 核。然后在搜索框中输入 `QDMA`，就可以找到 QDMA 的 IP 核了。
+
+image::sshot-5.png[Vivado 的小绿条]
+
+image::sshot-6.png[自动连线]
+
+这个时候 Vivado 会很 #“贴心”# 地弹出一个小绿条，要抢着帮你连线。在很多时候，这个小绿条很好用，像 XDMA 等可谓是开箱即用。但是，现在是 QDMA，这玩意会把你的设计搞得一团糟。
+
+=== ？我复位呢
+
+image::sshot-7.png[soft_reset_n]
+
+首先映入眼帘的是 `soft_reset_n` 没接。这个信号是用来复位 QDMA 的，虽然悬空在大部分情况下问题不大，但是也不推荐悬空。
+
+=== 先烧了再说
+
+IMPORTANT: 别忘了启用 SR-IOV 功能！
+
+直接生成最外层的 wrapper，导入管脚约束，综合，布局布线，烧录。
+
+.动手做一做，看看会发生什么
+[%collapsible]
+====
+很明显：**驱动挂不上去，查看 dmesg，显示 Invalid config bar**。
+====
+
+=== 淦！怎么这里还有
+
+这问题似曾相识，似乎在前面遇到过这个问题。但是，这次的问题不是 `mailbox` 没开，而是 `mailbox` 开了。
+
+盲猜这时候又有 #老手# 开始改驱动了。~看来你觉得你前面写的那么多都是无用功啊。~很明显，但凡看我前面写了这么多，就知道这个问题肯定不是驱动的问题。
+
+其实看看 Warning 就已经能看到一些线索了，QDMA 有输入引脚悬空。
+
+很多人就要问了，
+
+[qanda]
+
+为啥不能悬空呢？::
+可以悬空，但是 `ready` 肯定是不能悬空的。
+所以，这里的问题就是 `ready` 悬空了。这个信号是用来告诉 QDMA，下游已经准备好了，可以开始传输数据了。如果这个信号悬空，那么 QDMA 就会一直等待下游准备好，而下游也会一直等待 QDMA 开始传输数据，这就是死锁。
+
+那具体是哪个 `ready` 信号线没接呢？::
+看输出的 Warning。这里是 `tm_dsc_sts_rdy` 和 `qsts_out_rdy`。
+
+最后，把 `ready` 信号线接上，再次编译，再次下载，再次测试。
+
+image::sshot-4.png[最后的 Block Design]
+
+噔噔咚，终于可以正常工作了。
+
+== F.A.Q.
+
+[qanda]
+
+读不到 PCI-E 设备应该怎么排查？::
+
+一般是由于 FPGA 没有正常工作导致的。
+
+. 检查约束管脚是否正确。如果有原理图，需要仔细对一遍，别接反了！
+
+. 检查约束是否正确施加到了设计中。如果是 Block Design，需要检查最外层的 wrapper。
+因为设计的外置端口命名不一定一致，所以建议是检查 IO Floorplanning 是否有没接的。
+
+Windows 驱动报 10 错误应该怎么排查？::
+
+一般是由于 QDMA 没有正常工作导致的。
+
+. 首先检查复位信号是否接上了。
+
+. 其次检查 `ready` 信号是否接上了。
+
+QDMA 虚拟化到 QEMU 里面会挂内核::
+
+. 首先检查 BIOS 及 Linux 是否启用 IOMMU 和 SR-IOV。
+. 检查 QEMU 是否启用了 SR-IOV。（有部分时候需要指定 `-cpu=host`）
+. 只虚拟化 VF 设备，不要虚拟化 PF 设备。#尤其是别虚拟化了 PF 设备，还 4 个 PF 设备就虚拟化了 1 个（这更是寄中之寄）。#
+
+== Known Issues
+
+[qanda]
+
+. 在不启用 SR-IOV 的情况下，PF 只能识别出第一个。
+
+. Block Design 直接生成的项目是不能用于 `dma-pref` 和 `dma-latency` 的测试的。
+原因是这俩玩意需要 CSR 寄存器的支持，而 CSR 寄存器需要 Verilog 手动实现。
