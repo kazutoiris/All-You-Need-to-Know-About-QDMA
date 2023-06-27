@@ -5,6 +5,7 @@ set_property -dict [list \
   CONFIG.tl_pf_enable_reg {4} \
 ] [get_ips qdma_0]
 open_example_project [get_ips qdma_0] -in_process -force
+add_files "constraint.xdc"
 add_files "pcie.xdc"
 synth_ip [ get_ips * ] -quiet
 synth_design -quiet
