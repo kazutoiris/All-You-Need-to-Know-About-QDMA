@@ -1,4 +1,4 @@
-set_property PACKAGE_PIN AR26 [get_ports sys_rst_n]
+set_property PACKAGE_PIN AR26 [get_ports {sys_rst_n}]
 set_property PACKAGE_PIN AK10 [get_ports {sys_clk_n}]
 set_property PACKAGE_PIN AK11 [get_ports {sys_clk_p}]
 set_property PACKAGE_PIN AF1 [get_ports {pci_exp_rxn[0]}]
