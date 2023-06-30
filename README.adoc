@@ -7,6 +7,7 @@ ifdef::env-github[]
 endif::[]
 
 :imagesdir: image
+:stem:
 
 = QDMA 的那些事
 :author: kazutoiris
@@ -17,39 +18,216 @@ endif::[]
 :toclevels: 2
 :toc-title: 目录
 
+== 引子：揭开 PCIe 的神秘面纱
+
+=== 从老古董到现代标准
+
+PCIfootnote:[Peripheral Component Interface] 总线，其被开发出来的时间为 1990 年代初，当时人们期望用它来解决计算机的外设总线的一些缺点。而那个年代的这个领域的技术标准是 IBM 的 ATfootnote:[Advanced Technology] 总线，它也被其他供应商称为 ISAfootnote:[Industry Standard Architecture] 总线。ISA 总线是为 286 16位计算机而设计的，它在 286 上也发挥了足够的性能，但随着新型的 32 位计算机及其外设们出现，新的需求也出现了：更高的带宽、更多更好的功能（例如即插即用）。
+
+除此之外，ISA 总线使用的连接器是具有较多针脚数的大型连接器，使用起来相当麻烦。于是，几种用于替代 ISA 总线的设计也被提出，例如 IBM 的 MCAfootnote:[Micro-Channel Architecture] 总线，EISAfootnote:[Extended ISA] 总线，以及 VESAfootnote:[Video Electronics Standards Association] 总线。然而，所有的这些设计都具有一些缺点。最终，一个由 PC 市场的主要公司们共同联合建立的组织 PCISIGfootnote:[PCI Special Interest Group] 开发出了 PCI 总线，并将其作为一种开放总线。在当时，PCI 这种新型总线体系结构在性能上大大的优于 ISA，而且它在每个设备内部新定义了一组寄存器，称之为配置空间footnote:[configuration space]。这些寄存器使得软件可以查看一个 PCI 设备内部所需的存储和 IO 资源，同时让软件为一个系统下的各个设备分配互不冲突的地址。这些特性：开放式设计、高速、软件可见性与可控性footnote:[software visibility and control]，帮助 PCI 克服了限制 ISA 与其他总线的发展障碍，让 PCI 迅速地成为了 PC 中的标准外设总线。<<Chinese_Translation_of_PCI_Express_Technology>>
+
+PCIe 就像是一辆豪华跑车，它能够以惊人的速度传输数据，让设备之间的通信变得更加高效。这个标准迅速引起了全球计算机界的关注。随着 PCIe 标准的推广，越来越多的计算机厂商开始采用这项技术。它们纷纷推出了支持 PCIe 的主板和设备，带来了巨大的改变。
+
+以前，设备之间的通信速度非常慢，导致计算机性能的瓶颈。而现在，人们可以轻松地插入 PCIe 设备，享受到高速的数据传输和稳定的性能。而且，PCIe 的发展还不止于此，每一代的 PCIe 标准都会带来更高的传输速度和更强的性能。
+
+PCIe 3.0 x16 的吞吐速度可以达到 15.754GB/s，相当于你可以在一秒钟内传输完 1 部蓝光电影！这简直就像是给计算机加了一颗火箭发动机！然而，科技的进步从来都不会停止。为了满足越来越高的数据传输需求，PCIe 4.0 x16 横空出世！这项技术的速度比前一代快上一倍，每秒可以吞吐 31.508GB 的数据！
+
+=== 释放数据传输的闪电速度
+
+PCIe 接口采用了一种称为“点对点”连接的方式，这意味着每个设备都有自己独立的通信通道。这种设计可以避免多个设备之间的冲突，确保数据传输的高效性和稳定性。
+
+此外，PCIe 还使用了一种称为“lane”的概念。每个 PCIe 接口都包含多个 lane ，每个 lane 相当于一个独立的数据通道。这就好像是一条高速公路被分成了多个车道，每个车道都可以独立地传输数据，提高了数据传输的效率。
+
+[NOTE]
+====
+PCIe 使用双向连接的方式，即每个 lane 都有一个单向发送路径和一个单向接收路径。因为数据可以同时进行双向传输，所以在技术层面上，两个设备之间的通信是全双工的。但是在称呼上，PCIe 协议规范仍然把它被称为双单工。
+====
+
+PCI 使用了“反射波信号传输”技术，利用这个技术可以降低总线上的功率损耗。设备通过实现弱传输缓冲footnote:[weak transmit buffer]，仅需一半的驱动电压即可完成信号电平的翻转。按照设计，信号的入射波沿着传输线传输下去，直到到达传输线的末端。由于传输线的末端没有终端电阻footnote:[termination resistor]吸收回波，所以信号传输并没有就此中止，波阵面footnote:[wavefront]在遇到传输线末端的无穷大阻抗后会被反射回来。这种反射自然是具有叠加性的，当信号返回发射方时，它会与入射信号叠加使信号增加到全电压电平。当这样的反射信号到达初始的缓冲时，缓冲驱动器的低输出阻抗会中止这个信号的传输以及停止其继续反射。因此，从缓冲发出一个信号一直到接收方检测到有效的信号所花费的时间，就等于信号沿线路传输的时间加上反射回来的延迟时间和建立时间。所有这些都必须小于一个时钟周期。这一设计就和 I^2^C、CAN 协议不同，这两个协议都会要求使用终端电阻来消除反射信号。
+
+也正是因为这项技术，所以尽管 PCI 支持每路总线上最多挂载 32 个设备，但是实际的电气上限要小得多，在 33MHz 的基频下大约只可以支持 10 到 12 个负载。<<PCI_Express_Technology_3.0>>
+
+NOTE: 由于反射回波的存在，信号在传输过程中会受到一定的延迟。随着时钟频率的增加，这种延迟会变得更加明显，可能导致信号失真和数据错误。因此这项技术限制了 PCI 的最高时钟频率。那么为什么 I^2^C 消除反射信号后，最高只能到 4MHz 呢？而 PCI 尽管被限制了最高时钟频率，却仍然可以到 33MHz。（这个问题就不在这里回答了，可以自己搜索）
+
+发送端和接收端是通过一个交流耦合链路相连接。所谓“交流耦合”，意思是两个设备相连接的物理路径上放置有电容，它可以让信号的高频（交流）信号通过，而阻塞低频（直流）信号。许多串行传输方式中都使用了这种方法，因为它允许发送端和接收端的共模电压不同，这意味着发送端和接收端可以使用不同的参考电压。这也是在 PCB 设计 PCIe 发送端时必须放置耦合电容的原因之一。
+
+.为什么不在接收端也放呢？
+[%collapsible]
+====
+PCIe 标准里面明确规定：当两个设备通过连接器互联时，必须在发送端放置交流耦合电容。
+
+. 放远放近最大的不同时高速信号传输中的介质损耗和趋肤效应不同，当放置靠近接收端时，介质损耗和趋肤效应产生的衰减较大，因此，电容引发的阻抗不连续反射效应降低，可以通过高速互联模型推导出，在靠近接收端的 latexmath:[\frac14] 处是比较理想的，实测也是如此；但是当距离不远时，区别不是特别大，因此，PCIe 标准中，对于板级的电容放置并没有要求。
+
+. 当加入连接器时，串扰和寄生电容/电感增加，互联线上损耗增多，其损耗减小了低频分量信号幅度，对于高频虽有减小但是减小幅度倍数没有低频多，如果放置在接收端，低频信号就衰减的太多了，但是，并不是不行；实测信号，也会发现放置在发送端时信号完整性更好一些（相对而言），而放置在接收端，如果距离长，信号整体衰减的比较厉害；
+
+. 为了完善高速信号的可靠性，PCIe 在发送端加入了去加重技术，这进一步衰减了低频信号，如果再将电容放置远端，那么低频信号就是“雪上加霜”了；但是，也并不是不行；因此，有些设计里面，在发送和接收端都加电容，根据实际效果选择使用。同时都用的也存在，但是不建议这种用法，效果比较差！
+
+. 同时电容使用不当（包括位置、容值选择错误）也很容易导致产生二次反射。<<AC-coupling_capacitors_for_high-speed_differential_interfaces>>
+
+综上：因为：连接器带来的信号干扰+去加重技术，导致低频信号幅度加剧衰减，没有和高频信号幅值同等衰减，信号整体“形状”发生畸变了，在这种情况下，要适当的调整低频信号衰减，因此，放置在发送端是非常必要的！但是这种做法加剧了容抗不连续反射的影响，因此，信号比起没有使用连接器还是要差的！<<高速差分信号的耦合电容为什么要放在TX端>>
+
+[NOTE]
+=====
+. 凡是使用连接器的高速信号（背板高速信号设计），一般都是放置在发送端！
+. 上述条件的例外是：如果使用了均衡器或预加重技术，当然还是放在接收端好了！
+. 因此，放置在哪一端，必须要根据该信号的处理技术和构成而言，要分析驱动器的方式、电平逻辑构成、信号类型等，传统经验放置在接收端并不一定好用！
+=====
+====
+
+[TIP]
+====
+PCIe 吞吐量（可用带宽）计算方法为：latexmath:[吞吐量 = 传输速率 \times  编码方案 \times  信道数]。
+
+这里的编码方案指的是每传输 n 个 bit，需要发送 m 个 bit，这多出的 (m-n) 个 bit 并不是对上层应用有意义的信息，具体的用途在后面会讲到。目前 PCIe 1.0/2.0 的编码方案为 8b/10b，PCIe 3.0/4.0/5.0 的编码方案为 128b/130b。
+
+
+例如：PCIe 3.0 协议规定的速度为 8.0 GT/s，即每一条 lane 上支持每秒钟传输 8G 个 bit。PCIe 3.0 x16 的吞吐量就为 latexmath:[(8Gb / 8) \times (128 / 130) \times 16 = 15.754 GB/s]。
+====
+=== 稳定传输数据的魔法力量
+
+PCIe 链路不使用公共时钟，而使用了一个源同步模型，这意味着需要由发送端给接收端提供一个时钟来用于对输入数据进行锁存采样。对于 PCIe 链路来说，并不包括输出时钟信号。相反地，发送端会将时钟通过编码方案（8b/10b 编码）来嵌入数据流中，然后接收端将会从数据流中恢复出这个时钟，并用于对输入数据进行锁存。这一过程听起来可能非常神秘，但是其实很简单。在接收端中，PLLfootnote:[Phase-Locked Loop] 电路将输入的比特流作为参考时钟，并将其时序或者相位与一个输出时钟相比较，这个输出时钟是 PLL 按照指定频率产生的时钟。也就是说 PLL 自身会产生一个指定频率的输出时钟，然后用比特流作为的参考时钟与自身产生的输出时钟相比较。基于比较的结果，PLL 将会升高或者降低输出时钟的频率，直到所比较的双方达到匹配。此时则可以称 PLL 已锁定，且输出时钟（恢复时钟）的频率已经精确地与发送数据的时钟相匹配。PLL 将会不断地调整恢复时钟，快速补偿修正由温度、电压因素对发送端时钟频率造成的影响。
+
+关于时钟恢复，有一件需要注意的事情，PLL 需要输入端的信号跳变来完成相位比较。如果很长一段时间数据都没有任何跳变，那么 PLL 的恢复时钟可能会偏离正确的时钟频率。为了避免这种问题，PCIe 在编码方案中使用了 LFSR 算法，可以用于生成一组称为控制字符的特殊数据符号，这些控制字符可以被用于帧同步、错误检测等。通过使用LFSR算法生成这些控制字符，可以保证它们具有一定的统计特性和良好的检测能力，以确保 PLL 可以在一段时间内保持锁定状态。<<pci-express-6.0-specification>>
+
+=== 数据流转的神奇中断
+
+. INTxfootnote:[Interrupt Request]是一种传统的中断请求方式，它使用系统总线发送中断信号给处理器。这种方式在早期的计算机系统中广泛使用，但它存在一些限制，如中断共享时可能引起冲突、中断处理延迟较高等问题。
+
+. MSIfootnote:[Message Signaled Interrupt]是一种改进的中断请求方式，它通过直接发送消息给处理器的方式来请求中断。这种方式可以提高中断的可伸缩性和性能，并且可以解决 INTx 中的一些问题。
+
+. MSI-Xfootnote:[Message Signaled Interrupt eXtended]是对 MSI 的扩展，它可以支持更多的中断向量。MSIx可以提供更高的性能和可伸缩性，特别适用于多处理器系统和虚拟化环境。
+
+总结来说，INTx 是传统的中断请求方式，MSI 是一种改进的中断请求方式，而 MSI-X 是对 MSI 的扩展，提供更多中断向量的支持。
+
+==== INTx
+
+PCI总线使用 `INTA#`、`INTB#`、`INTC#` 和 `INTD#` 信号向处理器发出中断请求。这些中断请求信号为低电平有效，并与处理器的中断控制器连接。在 PCI 体系结构中，这些中断信号属于边带信号footnote:[Sideband Signals]，边带信号指的是这些信号在 PCI 总线规范中是可选信号，而且只能在一个处理器系统的内部使用，并不能离开这个处理器环境。
+
+[IMPORTANT]
+=====
+
+. PCIe 总线配置空间中的配置命令寄存器footnote:[Configuration Command Register]中存在一个比特位被称为“禁用中断”footnote:[Interrupt Disable]，但是其只会影响 INTx，对 MSI/MSI-X 不会造成影响。因为 MSI/MSI-X 的使能（或禁止）是通过配置空间中的 `MSI/MSI-X Capability Command Register` 来实现的。
+
+. 一旦使能了 MSI/MSI-X，PCI/PCIe 总线便会自动禁止 INTx。
+
+=====
+
+==== MSI
+
+消息信号中断footnote:[MSI]是一种可选功能，使设备功能能够通过向系统指定的地址（使用双字footnote:[DWORD]内存写事务）写入系统指定的数据值来请求服务。操作系统在设备配置过程中初始化消息地址和消息数据（以下简称为“向量”），为每个支持 MSI 的功能号分配一个或多个向量。
+
+所以，MSI 本质上是一种内存读写，和 PCIe 总线中的Message 概念大相径庭。
+
+中断延迟（从中断信号到中断服务的时间）取决于系统。与当前的中断架构一致，消息信号中断**不提供**中断延迟时间的保证。
+
+==== MSI-X
+
+MSI-X定义了基本 MSI 功能的单独可选扩展。与 MSI 相比，MSI-X 支持更多的向量数目，支持分配向量数少于请求分配数时进行别名控制，以及每个向量使用独立地址和数据的能力。MSI-X 的大部分其他特性与 MSI 相同。
+
+一个功能号可以同时实现 MSI 和 MSI-X，但是操作系统**禁止**同时启用这两个中断。如果操作系统同时启用两者，会导致未定义的行为发生。
+
+=== 探寻 BAR 空间的奇妙之旅
+
+不管 PCIe 设备拥有多少个功能，其每一个功能号都有一个唯一的标识符与之对应。这个标识符就是 BDFfootnote:[Bus, Device, Function]，PCIe的配置软件（即Root的应用层，一般是PC）应当有能力识别整个PCIe总线系统的拓扑逻辑，以及其中的每一条总线footnote:[Bus]，每一个设备footnote:[Device]和每一项功能footnote:[Function]。
+
+在 BDF 中，总线号占用 8 位，设备号占用 5 位，函数号占用 3 位。显然，PCIe 总线最多支持 256 个子总线，每个子总线最多支持 32 个设备，每个设备最多支持 8 个功能。
+
+==== Type 0
+
+Type 0 设备包含所有终端设备，Type 0 Header 拥有 6 个可用的 BAR（每个大小为32bit）。
+
+image::type_0_header.svg[Type 0 Header,100%]
+
+==== Type 1
+
+Type 1 设备仅包含 Root Ports, Switches 和 Bridges，Type 1 Header 只拥有 2 个 BAR。
+
+image::type_1_header.svg[Type 1 Header,100%]
+
+对于 BAR 的操作如下：
+
+. 复位时，BAR 处于未初始化的状态。即低位 bit 固定为一个数值，来指示需要的内存的大小和类型，但是高位 bit 为 X。操作系统将会首先把每个 BAR 都通过配置写操作来将可写入的 bit 写为全1（被固定的低位bit不会受到配置写操作的影响）。写为全1这个操作是为了确定最低位的可写入的比特位footnote:[least-significant writable bit]位置，这个比特位的位置指示了需要被请求的地址空间的大小。例如，最低位的可写入的比特位为 12，则这个 BAR 需要请求 latexmath:[2^{12} = 4KB] 的地址空间。如果最低位的可写入的比特位为 20，那么这个 BAR 就要请求 latexmath:[2^{20} = 1MB] 的地址空间。
+
+. 然后操作系统再去读取 BAR 的内容，以此来获取设备地址空间的基址、大小和类型。
+
+=== 信息传递的交织舞曲
+
+在 PCIe 设备之间，信息是以包的形式进行传输的，包主要分为三类：TLPfootnote:[Transaction Layer Packet，事务层包]、DLLPfootnote:[Data Link Layer Packet，数据链路层包]和 Ordered Setfootnote:[有序命令集，物理层包]。
+
+image::PCIe_Packet.svg[PCIe Packet Structure,100%]
+
+发送方发起请求的完整过程如下：
+
+. 发送方发起一个请求，事务层将会组建 TLP Header，并在其后附上数据荷载（如果有），以及可选附加 ECRCfootnote:[End-to-End CRC]。随后 TLP 就会被放入一个虚拟通道 缓冲。这个虚拟通道缓冲会根据事务排序规则来管理 TLP 的顺序，并在向下转发 TLP 到数据链路层之前，确认接收方有足够的缓冲来接收这一个 TLP。
+
+. 当 TLP 到达数据链路层，它会被分配一个序列号footnote:[Sequence Number]，并基于 TLP 的内容和序列号来计算出一个 LCRCfootnote:[Link CRC] 来附加在原 TLP 后。然后会将经过这些处理过程之后的 TLP 保存一个副本，这个副本会保存在数据链路层的重传缓冲footnote:[Replay Buffer，也可称为 Retry Buffer]中，这是为了应对传输出错的情况。与此同时，这个 TLP 也会被向下转发至物理层。
+
+. 物理层将会进行一系列的操作来准备对这个数据包进行串行传输，包括字节条带化footnote:[Byte Striping]、扰码footnote:[Scrambling]、编码footnote:[Encoding]以及并串转换footnote:[Serializing]。对于 Gen1 和 Gen2 的设备，当进行 8b/10b 编码时，会将 STP 和 END 这两个控制字符分别加在 TLP 的首端和尾端。最后，这个数据包通过链路进行传输。在 Gen3 操作模式中，STP token 会被添加在 TLP 的首端，但是并不会在尾端加上 END，而是在 STP Token 中包含 TLP 大小的信息来判断 TLP 的尾部位置。
+
+==== TLP
+
+不同于并行总线，PCIe 这样的串行总线不使用总线上的控制信号来表示某时刻链路上正在发生什么。相反地，PCIe 链路上的发送方发出的比特流必须要有一个预期的大小，还要有一个可供接收方辨认的格式，这样接收方才能理解比特流的内容。此外，PCIe 在传输数据包时并不使用任何直接握手机制footnote:[immediate handshake]。
+
+除了逻辑空闲符号footnote:[Logical Idle Symbol]和 Ordered Set 的物理层包外，在活跃的 PCIe 链路上传输的信息的基本组块被称为 Packet（包），包是由符号组成的。链路上交换的两类主要的数据包为高层的 TLP 包和低层的用于链路维护的 DLLP 包。物理层的 Ordered Set 也是一种包，但是它并不像 TLP 和 DLLP 一样会被封装上包起始符号和包结束符号，并且 Ordered Set 也并没有像 TLP 和 DLLP 一样的字节条带化过程，相反地，Ordered Set 会在链路的每个通道（lane）上都复制一份，而不是像字节条带化一样把信息按字节分配到各个通道上。
+
+在 PCI 体系结构中，会在地址阶段和数据阶段使用奇偶校验边带信号，但是在 PCIe 中则不同。PCIe 中使用带内的 CRC 值来验证整个数据包是否进行了无错误的传输。同时 TLP 还会被发送方的数据链路层添加上一个序列号，这使得当这个序列号的数据包传输出错时可以很简单的定位到它，并进行自动的重传。发送方会在自己的重传缓冲内保存每个 TLP 的一个副本，直到接收方确认了这个 TLP 成功无错传输后才会将副本清除。这种 TLP 的确认机制被称为 ACK/NAK 协议，它用来形成基础的链路级 TLP 错误检测和纠正机制。
+
+
+==== DLLP
+
+DLLP是在数据链路层传输的数据包，主要用于传输可靠性相关的控制信息，并且 DLLP **永远不会**携带数据 Payload。
+
+DLLP 包通常用来通知 TLP ACK/NAK 状态的更新、通知流量控制机制中的可用缓存大小信息的更新、电源管理设置和厂商自定义信息管理等。
+
+DLLP 包固定为 8 字节大小，无论是在 8b/10b 或者128b/130b 编码方式下，其包括以下组成部分：
+
+. 4 字节的 DLLP 核心段，包括 1 字节的 DLLP 类型与另外 3 字节属性字段。属性字段含义随 DLLP 类型而变化。
+
+. 2 字节的 CRC 段，基于 DLLP 核心字段内容计算。重要的一点是，此处的 CRC 和 TLP 的 LCRC 字段不同。DLLP CRC 仅有 16 比特，并且其计算方式也与 32 比特的 LCRC 不同。2 字节 CRC 字段附于 4 字节核心字段之后，共计 6 字节内容会被传递给物理层。
+
+. 使用 8b/10b 编码时，一个 SDPfootnote:[Start of DLLP] 和 ENDfootnote:[End Good] 的控制符号会被添加到包的开头与结尾。自然地，这些字节会在发送前编码为 10-bit 符号。Gen3 使用 128b/130b 编码时，2 字节 SDP token 会被添加到 DLLP 包之前构成 8 字节的数据包，此时不会添加 END 符号或者令牌。
+
+IMPORTANT: 信息全部位于 4 字节核心段内，DLLP **永远不会**携带数据 Payload。
+
+==== Ordered Sets
+
+image::Ordered_Sets.svg[Ordered Sets,100%]
+
+Ordered Sets 是一种特殊的控制序列，用于补偿发送端和接收端之间的内部时钟的微小差异，同时也可用于指示链路进入或退出低功耗状态。Ordered Sets 只会终止于链路的接收端设备，而不会被 Switches 等转发。也就是说，如果接收端设备是 Switches，那么它的最终目的地就是 Switches。
+
 == QDMA 入门
 
 === 从例子工程开始
 
-image::sshot-3.png[打开例子工程]
+image::sshot-3.png[打开例子工程,100%]
 
 想要打开例子工程很简单，选中 `IP Catalog` 中的 `QDMA`，然后点击 `Open IP Example Design`。
 
 啪，很快嗷，一个新的工程就打开了。这个工程包含了一个 QDMA 的 IP 核，一个 BRAM 的 IP 核，还有很多 Verilog 代码。
 
-image::sshot-2.png[例子工程]
+image::sshot-2.png[例子工程,100%]
 
 轻车熟路的话，你可以直接编译这个工程，然后下载到板子上，看看效果。
 
 .动手做一做，看看会发生什么
 [%collapsible]
 ====
-很明显：**PCI-E 设备压根读不到**。
+很明显：**PCIe 设备压根读不到**。
 
 CAUTION: 想一想最有可能是什么原因？
 ====
 
 === 寄，没复位
 
-打开仅有的约束文件 `xilinx_qdma_pcie_x0y1.xdc` 看看，发现关于复位的约束是注释状态（甚至管脚还是错的）。
+打开仅有的约束文件 `xilinx_qdma_PCIe_x0y1.xdc` 看看，发现关于复位的约束是注释状态（甚至管脚还是错的）。
 很明显，这个项目是用于仿真的，所以不需要真实的外部接口提供复位信号。
 
-TIP: 所以 `pcie.xdc` 中除了 PCI-E 的管脚约束外还多了很多东西。
+TIP: 所以 `PCIe.xdc` 中除了 PCIe 的管脚约束外还多了很多东西。
 
 于是加上复位约束、时钟约束、管脚约束，再次编译，再次下载，再次测试。
 
 
-OK 了，兄弟们。可以读到 PCI-E 设备了。
+OK 了，兄弟们。可以读到 PCIe 设备了。
 
 赶紧从 GitHub 上火速克隆了 link:https://github.com/Xilinx/dma_ip_drivers[dma_ip_drivers] 项目，然后进入到 `dma_ip_drivers/QDMA/linux-kernel/`，一个 `make`，一个 `make install`。
 
@@ -114,7 +292,7 @@ ____
 
 很明显，这个 `QDMA_MAGIC_NUMBER` 是用来判断是否是 QDMA 的配置寄存器的。而这个配置寄存器是需要 `mailbox` 支持的。而从始至终，都没有关心 `mailbox` 是不是启用状态。
 
-image::sshot-1.png[打开 SR-IOV]
+image::sshot-1.png[打开 SR-IOV,100%]
 
 直接双击自定义 IP 核，果然是没开。打开后 footnote:[这里直接打开 SR-IOV，这里会自动把 mailbox 也打开]，再次编译，再次下载，再次测试。这次终于是没问题了。驱动可以成功挂上，`qdma_run_test_pf.sh` 等测试脚本也可以欢快地跑起来了。
 
@@ -128,15 +306,15 @@ Block Design 能够以图形化的方式设计和组织 FPGA 的 IP 核、时钟
 
 首先就是点击上面的“+”，添加一个 IP 核。然后在搜索框中输入 `QDMA`，就可以找到 QDMA 的 IP 核了。
 
-image::sshot-5.png[Vivado 的小绿条]
+image::sshot-5.png[Vivado 的小绿条,100%]
 
-image::sshot-6.png[自动连线]
+image::sshot-6.png[自动连线,100%]
 
 这个时候 Vivado 会很 #“贴心”# 地弹出一个小绿条，要抢着帮你连线。在很多时候，这个小绿条很好用，像 XDMA 等可谓是开箱即用。但是，现在是 QDMA，这玩意会把你的设计搞得一团糟。
 
 === ？我复位呢
 
-image::sshot-7.png[soft_reset_n]
+image::sshot-7.png[soft_reset_n,100%]
 
 首先映入眼帘的是 `soft_reset_n` 没接。这个信号是用来复位 QDMA 的，虽然悬空在大部分情况下问题不大，但是也不推荐悬空。
 
@@ -173,7 +351,7 @@ IMPORTANT: 别忘了启用 SR-IOV 功能！
 
 最后，把 `ready` 信号线接上，再次编译，再次下载，再次测试。
 
-image::sshot-4.png[最后的 Block Design]
+image::sshot-4.png[最后的 Block Design,100%]
 
 噔噔咚，终于可以正常工作了。
 
@@ -181,7 +359,7 @@ image::sshot-4.png[最后的 Block Design]
 
 [qanda]
 
-读不到 PCI-E 设备应该怎么排查？::
+读不到 PCIe 设备应该怎么排查？::
 
 一般是由于 FPGA 没有正常工作导致的。
 
@@ -212,3 +390,17 @@ QDMA 虚拟化到 QEMU 里面会挂内核::
 
 . Block Design 直接生成的项目是不能用于 `dma-pref` 和 `dma-latency` 的测试的。
 原因是这俩玩意需要 CSR 寄存器的支持，而 CSR 寄存器需要 Verilog 手动实现。
+
+[bibliography]
+== References
+
+* [[[PCI_Express_Technology_3.0]]] https://www.mindshare.com/Books/Titles/PCI_Express_Technology_3.0
+
+
+* [[[Chinese_Translation_of_PCI_Express_Technology]]] https://github.com/ljgibbslf/Chinese-Translation-of-PCI-Express-Technology-
+
+* [[[pci-express-6.0-specification]]] https://pcisig.com/pci-express-6.0-specification
+
+* [[[高速差分信号的耦合电容为什么要放在TX端]]] https://www.eda365.com/thread-115554-2-1.html
+
+* [[[AC-coupling_capacitors_for_high-speed_differential_interfaces]]] https://electronics.stackexchange.com/questions/173691/ac-coupling-capacitors-for-high-speed-differential-interfaces
